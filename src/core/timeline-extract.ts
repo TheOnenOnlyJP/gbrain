@@ -11,7 +11,12 @@
  * names, so its existing importers are unaffected.
  */
 
-import { parseInlineCitationTimelineEntries, findTimelineSourceDelimiter } from './link-extraction.ts';
+import {
+  parseInlineCitationTimelineEntries,
+  findTimelineSourceDelimiter,
+  matchPlainTimelineBullet,
+  PLAIN_TIMELINE_LINE_RE,
+} from './link-extraction.ts';
 
 export interface ExtractedTimelineEntry {
   slug: string;
@@ -55,6 +60,17 @@ export function extractTimelineFromContent(content: string, slug: string): Extra
     }
   }
 
+  // Format 1b: Plain-date bullet — - YYYY-MM-DD — Summary
+  // Shared matcher with parseTimelineEntries (link-extraction.ts): em dash
+  // only, full ISO date, valid calendar date. The rest is one summary under
+  // source 'markdown' (never split on an interior dash), so FS- and DB-side
+  // rows share one (source, summary) shape. #4277 receipts are skipped here too.
+  for (const line of content.split('\n')) {
+    const plain = matchPlainTimelineBullet(line);
+    if (!plain || /^Referenced in\s+\[/i.test(plain.summary)) continue;
+    entries.push({ slug, date: plain.date, source: 'markdown', summary: plain.summary });
+  }
+
   // Format 2: Header — ### YYYY-MM-DD — Title
   const headerPattern = /^###\s+(\d{4}-\d{2}-\d{2})\s*[—–-]\s*(.+)$/gm;
   while ((match = headerPattern.exec(content)) !== null) {
@@ -78,13 +94,13 @@ export function extractTimelineFromContent(content: string, slug: string): Extra
   // coverage. The entry's summary is the sentence the citation annotates
   // (the surrounding line with citation markers stripped).
   //
-  // Lines already captured by Format 1 are skipped: a timeline bullet often
-  // carries its own [Source: ...] citation, and re-extracting it would file
-  // a duplicate entry under a different (source, summary) shape that the
+  // Lines already captured by Format 1 or 1b are skipped: a timeline bullet
+  // often carries its own [Source: ...] citation, and re-extracting it would
+  // file a duplicate entry under a different (source, summary) shape that the
   // DB-level uniqueness cannot collapse.
   const bulletLinePattern = /^-\s+\*\*\d{4}-\d{2}-\d{2}\*\*\s*\|/;
   for (const entry of parseInlineCitationTimelineEntries(content, {
-    skipLine: (line) => bulletLinePattern.test(line),
+    skipLine: (line) => bulletLinePattern.test(line) || PLAIN_TIMELINE_LINE_RE.test(line),
   })) {
     entries.push({ slug, date: entry.date, source: entry.source, summary: entry.summary });
   }

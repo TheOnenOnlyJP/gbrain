@@ -5,6 +5,7 @@ import {
   extractTimelineFromContent,
   walkMarkdownFiles,
 } from '../src/commands/extract.ts';
+import { parseTimelineEntries } from '../src/core/link-extraction.ts';
 
 describe('extractMarkdownLinks', () => {
   it('extracts relative markdown links', () => {
@@ -345,6 +346,82 @@ Real claim. [Source: memo, 2025-01-02]`;
     const entries = extractTimelineFromContent(content, 'companies/acme-example');
     expect(entries).toHaveLength(1);
     expect(entries[0].summary).toBe('Landed the enterprise pilot with acme-example.');
+  });
+});
+
+describe('extractTimelineFromContent — plain-date em-dash bullets', () => {
+  it('extracts - YYYY-MM-DD — summary as one markdown-sourced entry', () => {
+    const content = `---\n\n## Timeline\n\n- 2025-09-25 — Signed the pilot agreement.`;
+    expect(extractTimelineFromContent(content, 'companies/acme-example')).toEqual([
+      { slug: 'companies/acme-example', date: '2025-09-25', source: 'markdown', summary: 'Signed the pilot agreement.' },
+    ]);
+  });
+
+  it('does not split the summary on an interior dash', () => {
+    const entries = extractTimelineFromContent('- 2025-09-25 — Board — approved the hire', 'test');
+    expect(entries).toHaveLength(1);
+    expect(entries[0].source).toBe('markdown');
+    expect(entries[0].summary).toBe('Board — approved the hire');
+  });
+
+  it('a trailing [Source: ..., YYYY-MM-DD] citation yields exactly one entry', () => {
+    const content = '- 2025-09-25 — Signed the pilot agreement. [Source: meetings/2025-09-25-x.md, 2025-09-25]';
+    expect(extractTimelineFromContent(content, 'test')).toEqual([{
+      slug: 'test',
+      date: '2025-09-25',
+      source: 'markdown',
+      summary: 'Signed the pilot agreement. [Source: meetings/2025-09-25-x.md, 2025-09-25]',
+    }]);
+  });
+
+  it('keeps a prose citation directly under a plain-date bullet', () => {
+    const content = `- 2025-03-18 — Meeting notes
+Follow-up decision recorded. [Source: memo, 2025-03-20]`;
+    const entries = extractTimelineFromContent(content, 'test');
+    expect(entries.map(e => [e.date, e.source, e.summary])).toEqual([
+      ['2025-03-18', 'markdown', 'Meeting notes'],
+      ['2025-03-20', 'memo', 'Follow-up decision recorded.'],
+    ]);
+  });
+
+  it('rejects hyphen/en-dash/pipe separators, partial dates, and invalid dates', () => {
+    for (const line of [
+      '- 2025-09-25 - Hyphen separator',
+      '- 2025-09-25 – En dash separator',
+      '- 2025-09-25 | Pipe separator',
+      '- 2026-04 — Month-only date',
+      '2025-09-25 — No bullet',
+      '- 2026-13-45 — Impossible date',
+    ]) {
+      expect(extractTimelineFromContent(line, 'test')).toEqual([]);
+    }
+  });
+
+  it('skips generated Referenced in backlink receipts (#4277)', () => {
+    const content = `- 2025-03-18 — Referenced in [Alice](../people/alice-example.md)`;
+    expect(extractTimelineFromContent(content, 'companies/acme-example')).toHaveLength(0);
+  });
+
+  it('leaves bold bullet extraction unchanged alongside plain bullets', () => {
+    const content = `- **2025-03-18** | Meeting — Discussed partnership
+- 2025-03-19 — Sent the proposal`;
+    expect(extractTimelineFromContent(content, 'test')).toEqual([
+      { slug: 'test', date: '2025-03-18', source: 'Meeting', summary: 'Discussed partnership' },
+      { slug: 'test', date: '2025-03-19', source: 'markdown', summary: 'Sent the proposal' },
+    ]);
+  });
+
+  it('emits the same (date, source, summary) tuples as parseTimelineEntries (#3957 parity)', () => {
+    const content = `## Timeline
+
+- 2025-09-25 — Signed the pilot agreement. [Source: meetings/2025-09-25-x.md, 2025-09-25]
+- 2025-10-01 — Board — approved the hire
+- 2025-10-05 — Referenced in [Acme](../companies/acme.md)`;
+    const tuple = (e: { date: string; source?: string; summary: string }) => JSON.stringify([e.date, e.source, e.summary]);
+    const fs = extractTimelineFromContent(content, 'test').map(tuple);
+    const db = parseTimelineEntries(content).map(tuple);
+    expect(fs).toEqual(db);
+    expect(fs).toHaveLength(2);
   });
 });
 

@@ -1829,14 +1829,30 @@ export function findTimelineSourceDelimiter(text: string): number {
 // summary and must not be shattered on its first interior dash.
 const TIMELINE_LINE_RE = /^\s*(?:-\s*)?\*\*(\d{4}-\d{2}-\d{2})\*\*\s*([|\-–—]+)\s*(.+?)\s*$/;
 // Chinese date lines: `- 2020年1月2日 | summary` (bold optional). Requires the
-// 年/月 markers so plain ASCII `- 2020-01-02 - text` does NOT match — non-bold
-// ASCII dates were never timeline entries and must stay that way.
+// 年/月 markers so plain ASCII `- 2020-01-02 - text` does NOT match; non-bold
+// ASCII dates are entries only in the narrow PLAIN_TIMELINE_LINE_RE shape below.
 const TIMELINE_LINE_RE_CN = /^\s*(?:-\s*)?(?:\*\*)?(\d{4})年(\d{1,2})月(\d{1,2})日?(?:\*\*)?\s*([|\-–—]+)\s*(.+?)\s*$/;
+// Plain-date bullets: `- YYYY-MM-DD — summary`. Deliberately narrow so notes
+// that merely start with a date stay non-entries: a `-` bullet, a full ISO
+// date, and an EM DASH only (hyphen/en-dash/pipe separators and partial dates
+// like `- 2026-04 — ...` do not match). The rest is one 'markdown' summary,
+// never split on an interior dash. Shared with extractTimelineFromContent
+// (timeline-extract.ts) so FS- and DB-side extraction emit one row shape.
+export const PLAIN_TIMELINE_LINE_RE = /^\s*-\s+(\d{4}-\d{2}-\d{2})\s+—\s+(.+?)\s*$/;
+
+/** One plain-date bullet, or null (no match, invalid calendar date, empty summary). */
+export function matchPlainTimelineBullet(line: string): { date: string; summary: string } | null {
+  const m = PLAIN_TIMELINE_LINE_RE.exec(line);
+  if (!m || !isValidDate(m[1])) return null;
+  const summary = m[2].trim();
+  return summary.length > 0 ? { date: m[1], summary } : null;
+}
 
 /**
  * Parse timeline entries from content. Looks at:
  *   - The full content (most pages have a top-level "## Timeline" heading).
  *   - Free-form `- **DATE** | text` lines anywhere.
+ *   - Plain-date `- DATE — text` bullets anywhere (PLAIN_TIMELINE_LINE_RE).
  *
  * Skips dates that don't represent valid calendar dates (e.g. 2026-13-45).
  * Multi-line entries: a date line followed by indented or blank-then-text
@@ -1848,8 +1864,9 @@ export function parseTimelineEntries(content: string): TimelineCandidate[] {
 
   let i = 0;
   while (i < lines.length) {
-    // Try English format first, then Chinese
+    // Try bold English format first, then plain-date, then Chinese
     const m = TIMELINE_LINE_RE.exec(lines[i]);
+    const pm = m ? null : PLAIN_TIMELINE_LINE_RE.exec(lines[i]);
     let date: string;
     let summary: string;
     let separator: string;
@@ -1857,6 +1874,10 @@ export function parseTimelineEntries(content: string): TimelineCandidate[] {
       date = m[1];
       separator = m[2];
       summary = m[3].trim();
+    } else if (pm) {
+      date = pm[1];
+      separator = '—';
+      summary = pm[2].trim();
     } else {
       const cm = TIMELINE_LINE_RE_CN.exec(lines[i]);
       if (!cm) { i++; continue; }
@@ -1894,7 +1915,7 @@ export function parseTimelineEntries(content: string): TimelineCandidate[] {
     let j = i + 1;
     while (j < lines.length) {
       const next = lines[j];
-      if (TIMELINE_LINE_RE.test(next)) break;
+      if (TIMELINE_LINE_RE.test(next) || PLAIN_TIMELINE_LINE_RE.test(next)) break;
       if (/^#{1,6}\s/.test(next)) break;
       if (next.trim().length === 0 && detailLines.length === 0) {
         // skip leading blank line; if we hit a blank after detail content
@@ -1921,9 +1942,11 @@ export function parseTimelineEntries(content: string): TimelineCandidate[] {
   // see it, so a page whose dates all live in citations scored zero
   // timeline coverage. Kept in sync with extractTimelineFromContent's
   // Format 3 (the fs-source path). Blocks already captured by the timeline
-  // bullet pass are skipped (a bullet often carries its own citation).
+  // bullet pass (bold, CN, and plain-date) are skipped: a bullet often carries
+  // its own citation, and it must stay one row, not a bullet row + citation row.
   for (const entry of parseInlineCitationTimelineEntries(content, {
-    skipLine: (line) => TIMELINE_LINE_RE.test(line) || TIMELINE_LINE_RE_CN.test(line),
+    skipLine: (line) =>
+      TIMELINE_LINE_RE.test(line) || TIMELINE_LINE_RE_CN.test(line) || PLAIN_TIMELINE_LINE_RE.test(line),
   })) {
     // #3957: carry the citation's source label in `source` (the dedup-key
     // column) so the row shape matches the FS extractor's Format 3; the

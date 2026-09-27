@@ -1005,6 +1005,110 @@ More prose here.
   });
 });
 
+describe('parseTimelineEntries — plain-date em-dash bullets', () => {
+  test('parses - YYYY-MM-DD — summary as one markdown-sourced entry', () => {
+    expect(parseTimelineEntries('- 2025-09-25 — Signed the pilot agreement.')).toEqual([
+      { date: '2025-09-25', summary: 'Signed the pilot agreement.', detail: '', source: 'markdown' },
+    ]);
+  });
+
+  test('parses a canonical ## Timeline section below a --- separator', () => {
+    const content = `Compiled truth.
+
+---
+
+## Timeline
+
+- 2025-09-25 — Signed the pilot agreement.
+- 2025-10-01 — Kickoff call with the ops team.
+  - 2025-10-02 — Indented follow-up is its own entry.`;
+    expect(parseTimelineEntries(content).map(e => [e.date, e.summary])).toEqual([
+      ['2025-09-25', 'Signed the pilot agreement.'],
+      ['2025-10-01', 'Kickoff call with the ops team.'],
+      ['2025-10-02', 'Indented follow-up is its own entry.'],
+    ]);
+  });
+
+  test('does not split the summary on an interior dash', () => {
+    const entries = parseTimelineEntries('- 2025-09-25 — Board — approved the hire');
+    expect(entries).toEqual([
+      { date: '2025-09-25', summary: 'Board — approved the hire', detail: '', source: 'markdown' },
+    ]);
+  });
+
+  test('a trailing [Source: ..., YYYY-MM-DD] citation yields exactly one entry', () => {
+    const line = '- 2025-09-25 — Signed the pilot agreement. [Source: meetings/2025-09-25-x.md, 2025-09-25]';
+    const entries = parseTimelineEntries(line);
+    expect(entries).toEqual([{
+      date: '2025-09-25',
+      summary: 'Signed the pilot agreement. [Source: meetings/2025-09-25-x.md, 2025-09-25]',
+      detail: '',
+      source: 'markdown',
+    }]);
+  });
+
+  test('a citation with a different date still yields one entry, dated by the bullet', () => {
+    const entries = parseTimelineEntries('- 2025-09-25 — Signed the pilot. [Source: email, 2025-09-27]');
+    expect(entries).toHaveLength(1);
+    expect(entries[0].date).toBe('2025-09-25');
+  });
+
+  test('keeps a prose citation directly under a plain-date bullet', () => {
+    const entries = parseTimelineEntries(`- 2025-03-18 — Meeting notes
+Follow-up decision recorded. [Source: memo, 2025-03-20]`);
+    expect(entries.map(e => [e.date, e.source])).toEqual([
+      ['2025-03-18', 'markdown'],
+      ['2025-03-20', 'memo'],
+    ]);
+  });
+
+  test('rejects hyphen, en dash, and pipe separators on non-bold dates', () => {
+    for (const line of [
+      '- 2025-09-25 - Hyphen separator',
+      '- 2025-09-25 – En dash separator',
+      '- 2025-09-25 | Pipe separator',
+      '- 2025-09-25—No spaces around the dash',
+    ]) {
+      expect(parseTimelineEntries(line)).toEqual([]);
+    }
+  });
+
+  test('rejects partial dates, unbulleted dates, and invalid calendar dates', () => {
+    for (const line of [
+      '- 2026-04 — Month-only date',
+      '- 2026 — Year-only date',
+      '2025-09-25 — No bullet',
+      '* 2025-09-25 — Star bullet',
+      '- 2026-13-45 — Impossible date',
+      '- 2026-02-30 — Feb 30',
+      '- 2025-09-25 —   ',
+    ]) {
+      expect(parseTimelineEntries(line)).toEqual([]);
+    }
+  });
+
+  test('skips generated Referenced in backlink receipts (#4277)', () => {
+    const content = `- 2026-01-15 — Met with Alice
+- 2026-06-13 — Referenced in [Acme](../companies/acme.md)
+- 2026-07-01 — Signed the term sheet`;
+    expect(parseTimelineEntries(content).map(e => e.summary)).toEqual([
+      'Met with Alice',
+      'Signed the term sheet',
+    ]);
+  });
+
+  test('mixes with bold bullets without changing their shape', () => {
+    const content = `- **2026-01-15** | Meeting — Discussed partnership
+- 2026-01-16 — Sent the proposal
+- **2026-01-17** - Dash bold bullet`;
+    expect(parseTimelineEntries(content)).toEqual([
+      { date: '2026-01-15', summary: 'Discussed partnership', detail: '', source: 'Meeting' },
+      { date: '2026-01-16', summary: 'Sent the proposal', detail: '', source: 'markdown' },
+      { date: '2026-01-17', summary: 'Dash bold bullet', detail: '', source: 'markdown' },
+    ]);
+  });
+});
+
 // ─── deriveTimelineAnchor ──────────────────────────────────────
 
 describe('deriveTimelineAnchor', () => {
