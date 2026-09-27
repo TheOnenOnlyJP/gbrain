@@ -90,6 +90,110 @@ describeBoth('v0.29 engine parity — getRecentSalience', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Future eligibility: a future-dated page needs a signal (emotional weight or
+// an active take; holder-restricted reads count only permitted holders' takes)
+// unless includeFuture is set, and recency age clamps at zero. Both engines
+// must admit the same rows and score them identically.
+// ---------------------------------------------------------------------------
+
+const ELIGIBILITY_LIVE = [
+  'eligibility/past-zero',
+  'eligibility/today-zero',
+  'eligibility/future-zero',
+  'eligibility/future-emotional',
+  'eligibility/future-take-reader',
+  'eligibility/future-take-owner',
+];
+
+async function seedEligibilityFixture(engine: BrainEngine): Promise<void> {
+  for (const slug of [...ELIGIBILITY_LIVE, 'eligibility/future-deleted']) {
+    await engine.putPage(slug, { type: 'note', title: slug, compiled_truth: 'salience parity fixture' });
+  }
+  await engine.executeRaw(
+    `UPDATE pages
+        SET effective_date = CASE slug
+          WHEN 'eligibility/past-zero' THEN now() - interval '1 day'
+          WHEN 'eligibility/today-zero' THEN now()
+          ELSE now() + interval '30 days'
+        END
+      WHERE slug LIKE 'eligibility/%'`,
+  );
+  await engine.executeRaw(
+    `UPDATE pages SET emotional_weight = 0.25 WHERE slug = 'eligibility/future-emotional'`,
+  );
+  await engine.executeRaw(
+    `INSERT INTO takes (page_id, row_num, claim, kind, holder, weight, active)
+       SELECT id, 0, 'future signal', 'take',
+              CASE WHEN slug = 'eligibility/future-take-owner' THEN 'owner' ELSE 'reader' END,
+              0.5, TRUE
+         FROM pages
+        WHERE slug IN ('eligibility/future-take-reader', 'eligibility/future-take-owner', 'eligibility/future-deleted')`,
+  );
+  await engine.softDeletePage('eligibility/future-deleted');
+}
+
+describeBoth('engine parity — getRecentSalience future eligibility', () => {
+  let pglite: PGLiteEngine;
+  let postgres: BrainEngine;
+
+  beforeAll(async () => {
+    pglite = new PGLiteEngine();
+    await pglite.connect({ engine: 'pglite' } as never);
+    await pglite.initSchema();
+    await seedEligibilityFixture(pglite);
+
+    postgres = await setupDB();
+    await seedEligibilityFixture(postgres);
+  }, 60_000);
+
+  afterAll(async () => {
+    if (pglite) await pglite.disconnect();
+    await teardownDB();
+  });
+
+  const cases: Array<{ label: string; includeFuture: boolean; holders?: string[]; expected: string[] }> = [
+    {
+      label: 'default',
+      includeFuture: false,
+      expected: ELIGIBILITY_LIVE.filter(s => s !== 'eligibility/future-zero'),
+    },
+    { label: 'includeFuture', includeFuture: true, expected: ELIGIBILITY_LIVE },
+    {
+      label: 'restricted to reader',
+      includeFuture: false,
+      holders: ['reader'],
+      expected: ['eligibility/past-zero', 'eligibility/today-zero', 'eligibility/future-take-reader'],
+    },
+    { label: 'restricted + includeFuture', includeFuture: true, holders: ['reader'], expected: ELIGIBILITY_LIVE },
+  ];
+
+  for (const c of cases) {
+    for (const recency_bias of ['flat', 'on'] as const) {
+      test(`${c.label}, recency_bias=${recency_bias}: same rows and scores on both engines`, async () => {
+        const opts = {
+          days: 7,
+          limit: 50,
+          slugPrefix: 'eligibility/',
+          recency_bias,
+          includeFuture: c.includeFuture,
+          ...(c.holders ? { takesHoldersAllowList: c.holders } : {}),
+        };
+        const pgliteRows = await pglite.getRecentSalience(opts);
+        const postgresRows = await postgres.getRecentSalience(opts);
+        const expected = [...c.expected].sort();
+        expect(pgliteRows.map(r => r.slug).sort()).toEqual(expected);
+        expect(postgresRows.map(r => r.slug).sort()).toEqual(expected);
+        const pgScores = new Map(postgresRows.map(r => [r.slug, r.score]));
+        for (const row of pgliteRows) {
+          expect(Number.isFinite(row.score)).toBe(true);
+          expect(row.score).toBeCloseTo(pgScores.get(row.slug)!, 3);
+        }
+      });
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
 // D5 — setEmotionalWeightBatch + getSalienceScores write/read parity.
 //
 // Pinned engine shapes (src/core/{pglite,postgres}-engine/salience.ts +

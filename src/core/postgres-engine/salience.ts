@@ -160,6 +160,16 @@ export async function getRecentSalience(deps: PgSalienceDeps, opts: SalienceOpts
     // Scope is already bound above; use the shared live/privacy predicate
     // before ranking and LIMIT, including for holder-unrestricted callers.
     const readCondition = sql.unsafe(`AND ${pageReadFilter('p', { excludePrivate: opts.excludePrivate }, [], true)}`);
+    // Future-dated pages (calendar days, plans) must carry a signal to rank:
+    // the same emotional + joined-take terms the score uses, so a restricted
+    // read tests only permitted holders' takes and ignores emotional_weight.
+    // Parity with pglite-engine.getRecentSalience().
+    const futureCondition = opts.includeFuture === true
+      ? sql``
+      : sql`HAVING p.effective_date IS NULL
+           OR p.effective_date <= ${new Date().toISOString()}::timestamptz
+           OR ${sql.unsafe(emotionalSql)} > 0
+           OR COUNT(DISTINCT t.id) > 0`;
     const rows = await sql`
       SELECT p.slug, p.source_id, p.title, p.type, p.updated_at, ${sql.unsafe(emotionalSql)} AS emotional_weight,
              COUNT(DISTINCT t.id) AS take_count,
@@ -175,6 +185,7 @@ export async function getRecentSalience(deps: PgSalienceDeps, opts: SalienceOpts
          ${excludeBriefings}
          ${sourceCondition} ${readCondition}
        GROUP BY p.id
+       ${futureCondition}
        ORDER BY score DESC
        LIMIT ${limit}
     `;

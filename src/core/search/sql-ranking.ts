@@ -364,6 +364,8 @@ function nowExprToSql(now: NowExpr): string {
  *   - halflifeDays = 0 (or coefficient = 0) → literal 0 (evergreen short-circuit)
  *   - halflifeDays > 0  → coefficient * halflife / (halflife + days_old)
  *
+ * days_old is clamped at 0, so the component never exceeds `coefficient`.
+ *
  * Prefixes sorted longest-first so 'media/articles/' matches before 'media/'
  * (mirror of buildSourceFactorCase's ordering).
  *
@@ -387,7 +389,10 @@ export function buildRecencyComponentSql(opts: {
   const { slugColumn, dateExpr, decayMap, fallback } = opts;
   const now = opts.now ?? { kind: 'now' };
   const nowSql = nowExprToSql(now);
-  const daysOldSql = `EXTRACT(EPOCH FROM (${nowSql} - ${dateExpr})) / 86400.0`;
+  // Effective dates can be in the future (calendar days, plans). Clamp age at
+  // zero so a future date scores like "today" instead of shrinking or
+  // negating the denominator into an unbounded recency bonus.
+  const daysOldSql = `GREATEST(0.0, EXTRACT(EPOCH FROM (${nowSql} - ${dateExpr})) / 86400.0)`;
 
   const prefixes = Object.keys(decayMap).sort((a, b) => b.length - a.length);
   const branches: string[] = [];

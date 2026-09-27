@@ -42,6 +42,14 @@ const get_recent_salience: Operation = {
         "                     ('what's been salient lately' vs 'what matters\n" +
         "                     in this brain regardless of when').",
     },
+    include_future: {
+      type: 'boolean',
+      description:
+        'Include future-dated pages (effective_date after now, e.g. upcoming calendar days) ' +
+        'even when they carry no signal. Default false: a future-dated page is returned only ' +
+        'when it has emotional weight or an active take; holder-restricted reads count only ' +
+        'permitted holders\' takes. Future dates never earn a recency bonus beyond today\'s.',
+    },
   },
   handler: async (ctx, p) => {
     const recencyBias = p.recency_bias === 'on' ? 'on' : 'flat';
@@ -56,6 +64,7 @@ const get_recent_salience: Operation = {
       limit: typeof p.limit === 'number' ? p.limit : undefined,
       slugPrefix: typeof p.slugPrefix === 'string' ? p.slugPrefix : undefined,
       recency_bias: recencyBias,
+      includeFuture: p.include_future === true,
       ...await readPolicyOpts(ctx),
     });
     return rows;

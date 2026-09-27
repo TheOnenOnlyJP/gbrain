@@ -504,6 +504,12 @@ export interface SalienceOpts extends PageReadPolicy {
    * Default preserves v0.29.0 ranking; 'on' is opt-in.
    */
   recency_bias?: 'flat' | 'on';
+  /**
+   * Admit future-dated pages that carry no signal. By default a page whose
+   * effective_date is after now is kept only when it has emotional weight or
+   * an active take (holder-restricted reads count only permitted takes).
+   */
+  includeFuture?: boolean;
 }
 
 export interface SalienceResult {

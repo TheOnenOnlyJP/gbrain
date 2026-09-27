@@ -121,6 +121,18 @@ export async function getRecentSalience(deps: PgliteSalienceDeps, opts: Salience
     // Scope is already bound above; the shared live predicate excludes deleted,
     // quarantined and archived-source rows before ranking and LIMIT.
     sourceCondition += ` AND ${pageReadFilter('p', { excludePrivate: opts.excludePrivate }, [], true)}`;
+    // Future-dated pages (calendar days, plans) must carry a signal to rank:
+    // the same emotional + joined-take terms the score uses, so a restricted
+    // read tests only permitted holders' takes and ignores emotional_weight.
+    // Parity with postgres-engine.getRecentSalience().
+    let futureCondition = '';
+    if (opts.includeFuture !== true) {
+      params.push(new Date().toISOString());
+      futureCondition = `HAVING p.effective_date IS NULL
+            OR p.effective_date <= $${params.length}::timestamptz
+            OR ${emotionalSql} > 0
+            OR COUNT(DISTINCT t.id) > 0`;
+    }
     params.push(limit);
     const limitParam = `$${params.length}`;
 
@@ -158,6 +170,7 @@ export async function getRecentSalience(deps: PgliteSalienceDeps, opts: Salience
           ${excludeBriefings}
           ${sourceCondition}
         GROUP BY p.id
+        ${futureCondition}
         ORDER BY score DESC
         LIMIT ${limitParam}`,
       params

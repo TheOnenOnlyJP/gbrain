@@ -10,6 +10,7 @@
  *   gbrain salience                            # top 20 over last 14 days
  *   gbrain salience --days 7                   # narrower window
  *   gbrain salience --kind personal            # filter to slug-prefix
+ *   gbrain salience --include-future           # keep signal-less future-dated pages
  *   gbrain salience --json                     # JSON for agents
  */
 
@@ -21,6 +22,7 @@ interface RunOpts {
   days?: number;
   limit?: number;
   slugPrefix?: string;
+  includeFuture?: boolean;
   json?: boolean;
 }
 
@@ -30,6 +32,7 @@ function parseArgs(args: string[]): RunOpts | { help: true } {
     const a = args[i];
     if (a === '--help' || a === '-h') return { help: true };
     if (a === '--json') { opts.json = true; continue; }
+    if (a === '--include-future') { opts.includeFuture = true; continue; }
     if (a === '--days') {
       const n = parseInt(args[++i] ?? '', 10);
       if (Number.isFinite(n) && n >= 0) opts.days = n;
@@ -59,6 +62,7 @@ Options:
   --limit N           Max results (default 20, capped at 100)
   --kind PREFIX       Slug-prefix filter (e.g. personal, wiki/people)
   --slug-prefix P     Same as --kind
+  --include-future    Also list future-dated pages with no emotional weight or takes
   --json              JSON output for agents
   --help, -h          Show this help
 `;
@@ -81,6 +85,7 @@ export async function runSalience(engine: BrainEngine, args: string[]): Promise<
       days: parsed.days,
       limit: parsed.limit,
       slugPrefix: parsed.slugPrefix,
+      include_future: parsed.includeFuture,
     }, { timeoutMs: 30_000 });
     rows = unpackToolResult<Awaited<ReturnType<BrainEngine['getRecentSalience']>>>(raw);
   } else {
@@ -88,6 +93,7 @@ export async function runSalience(engine: BrainEngine, args: string[]): Promise<
       days: parsed.days,
       limit: parsed.limit,
       slugPrefix: parsed.slugPrefix,
+      includeFuture: parsed.includeFuture,
     });
   }
   if (parsed.json) {
