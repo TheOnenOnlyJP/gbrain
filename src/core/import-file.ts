@@ -50,6 +50,7 @@ import { DEFAULT_SYNOPSIS_MODEL } from './page-summary.ts';
 import { runGuardrails } from './guardrails.ts';
 import { FACTS_FENCE_BEGIN, FACTS_FENCE_END, parseFactsFence, renderFactsTable, restoreHiddenFactRows, factsGapWarning } from './facts-fence.ts';
 import { scanFencedBlocks, MAX_FENCES_PER_PAGE } from './fence-scan.ts';
+import { sanitizeContentFieldsForImport } from './content-secret-guard.ts';
 
 /**
  * v0.20.0 Cathedral II Layer 8 D2 — markdown fence extraction helper.
@@ -369,6 +370,13 @@ export async function importFromContent(
      * and reindex leave it unset so the guard stays armed.
      */
     allowEmptyOverwrite?: boolean;
+    /**
+     * Redact credential-shaped content before parsing, hashing, embedding, or
+     * persistence. Used at direct external-ingest boundaries; bulk file syncs
+     * use the repository-wide preflight so they do not spawn a scanner once
+     * per file.
+     */
+    sanitizeSecrets?: boolean;
   } = {},
 ): Promise<ImportResult> {
   // Normalize BEFORE any tx write: putPage lowercases via validateSlug but
@@ -394,6 +402,31 @@ export async function importFromContent(
       chunks: 0,
       error: `Content too large (${byteLength} bytes, max ${MAX_FILE_SIZE}). Split the content into smaller files or remove large embedded assets.`,
     };
+  }
+
+  if (opts.sanitizeSecrets === true) {
+    const originalFields = [
+      content,
+      opts.source_kind ?? '',
+      opts.source_uri ?? '',
+      opts.ingested_via ?? '',
+    ];
+    const guardedFields = await sanitizeContentFieldsForImport(originalFields, `${slug}.md`);
+    content = guardedFields[0] ?? '';
+    if (opts.source_kind !== null && opts.source_kind !== undefined) {
+      opts.source_kind = guardedFields[1] ?? '';
+    }
+    if (opts.source_uri !== null && opts.source_uri !== undefined) {
+      opts.source_uri = guardedFields[2] ?? '';
+    }
+    if (opts.ingested_via !== null && opts.ingested_via !== undefined) {
+      opts.ingested_via = guardedFields[3] ?? '';
+    }
+    if (guardedFields.some((field, index) => field !== originalFields[index])) {
+      process.stderr.write(
+        `[gbrain] credential guard redacted credential-shaped content before persistence: ${slug}\n`,
+      );
+    }
   }
 
   const parsed = parseMarkdown(content, slug + '.md', {

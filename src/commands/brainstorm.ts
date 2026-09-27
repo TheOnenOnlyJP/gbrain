@@ -364,6 +364,7 @@ export async function persistSavedIdea(
   let dbError: string | undefined;
   try {
     await importFromContent(engine, args.slug, args.content, {
+      sanitizeSecrets: true,
       noEmbed: true,
       sourceId,
       sourcePath: `${args.slug}.md`,

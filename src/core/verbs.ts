@@ -102,7 +102,7 @@ const remember: Operation = {
   annotations: { title: 'remember (memory write)', idempotentHint: true },
   handler: async (ctx, p) => {
     const { verbError, parseTtlParam } = await import('./operations.ts');
-    const fact = typeof p.fact === 'string' ? p.fact.trim() : '';
+    let fact = typeof p.fact === 'string' ? p.fact.trim() : '';
     if (!fact) {
       throw verbError(
         'invalid_params',
@@ -110,7 +110,7 @@ const remember: Operation = {
         'Pass the claim to remember, e.g. fact: "picked Stripe over Adyen — onboarding speed".',
       );
     }
-    const provenance = typeof p.provenance === 'string' ? p.provenance.trim() : '';
+    let provenance = typeof p.provenance === 'string' ? p.provenance.trim() : '';
     if (!provenance) {
       throw verbError(
         'provenance_required',
@@ -143,6 +143,15 @@ const remember: Operation = {
     }
     const validUntil = parseTtlParam(p.ttl); // throws verbError(invalid_params) on bad input
 
+    let entity = typeof p.entity === 'string' && p.entity.trim() ? p.entity.trim() : '';
+    if (!ctx.dryRun) {
+      const { sanitizeContentFieldsForImport } = await import('./content-secret-guard.ts');
+      [fact, provenance, entity] = await sanitizeContentFieldsForImport(
+        [fact, provenance, entity],
+        'memory-verb/remember',
+      );
+    }
+
     if (ctx.dryRun) {
       return {
         dry_run: true,
@@ -157,7 +166,7 @@ const remember: Operation = {
       fact,
       provenance,
       kind: kind as (typeof FACT_KINDS)[number],
-      entity: typeof p.entity === 'string' && p.entity.trim() ? p.entity.trim() : null,
+      entity: entity || null,
       visibility,
       validUntil,
     });

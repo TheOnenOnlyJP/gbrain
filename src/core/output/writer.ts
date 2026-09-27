@@ -247,7 +247,12 @@ class WriteTxImpl implements WriteTx {
   }
 
   async putRawData(slug: string, source: string, data: object): Promise<void> {
-    await this.engine.putRawData(slug, source, data, this.scope());
+    const { sanitizeStructuredContentForImport } = await import('../content-secret-guard.ts');
+    const guarded = await sanitizeStructuredContentForImport(
+      { source, data },
+      `raw-data/${slug}`,
+    );
+    await this.engine.putRawData(slug, guarded.source, guarded.data, this.scope());
     this.touchedSlugs.add(slug);
   }
 

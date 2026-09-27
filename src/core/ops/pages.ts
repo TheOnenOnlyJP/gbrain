@@ -437,6 +437,7 @@ const put_page: Operation = {
     }
     const result = await importFromContent(ctx.engine, slug, p.content as string, {
       noEmbed,
+      sanitizeSecrets: true,
       // v0.42 (#1699): untrusted callers can't smuggle gate-owned frontmatter
       // markers (quarantine/content_flag/embed_skip). Fail-closed — anything
       // not strictly local is remote (matches CV6 / v0.26.9 F7b posture).
