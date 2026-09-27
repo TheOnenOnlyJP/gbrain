@@ -17,6 +17,7 @@ import type { Principal } from './model.ts';
 import { normalizeSubagentPageInput } from './page-input.ts';
 import { assertKnowledgePublicationAllowed } from '../shared-skills/knowledge-guard.ts';
 import { WRITER_INSPECTION_HINT } from './admin-intent.ts';
+import { sanitizePageMutationParams } from '../content-secret-guard.ts';
 
 export async function requestPrincipalForContext(ctx: OperationContext): Promise<Principal> {
   if (ctx.auth?.principal) return { ...ctx.auth.principal };
@@ -48,7 +49,11 @@ export async function submitPageMutation(ctx: OperationContext,
     }
   }
   assertPersistenceAccepting(ctx.engine);
-  const p: Record<string, unknown> = { ...input.params, ...parseMutationPrecondition(input.params) };
+  // Redact before admission: the write journal stores caller intent verbatim.
+  // Managed file imports are covered by the repository-wide preflight.
+  const params = input.managedFileImport === true ? input.params
+    : await sanitizePageMutationParams(input.operation, input.params);
+  const p: Record<string, unknown> = { ...params, ...parseMutationPrecondition(params) };
   const requestId = typeof p.request_id === 'string' ? p.request_id : randomUUID();
   const sourceId = pageMutationSource(ctx, p, input.operation);
   await initializeLocalPersistence(ctx);

@@ -24,9 +24,14 @@ const put_raw_data: Operation = {
   handler: async (ctx, p) => {
     enforceClientSlugFence(ctx, p.slug as string, 'put_raw_data');
     if (ctx.dryRun) return { dry_run: true, action: 'put_raw_data', slug: p.slug, source: p.source };
+    const { sanitizeStructuredContentForImport } = await import('../content-secret-guard.ts');
+    const guarded = await sanitizeStructuredContentForImport(
+      { source: p.source as string, data: p.data as object },
+      `raw-data/${p.slug as string}`,
+    );
     // v0.31.8 (D7 + D21): thread ctx.sourceId.
     const sourceOpts = ctx.sourceId ? { sourceId: ctx.sourceId } : {};
-    await ctx.engine.putRawData(p.slug as string, p.source as string, p.data as object, sourceOpts);
+    await ctx.engine.putRawData(p.slug as string, guarded.source, guarded.data, sourceOpts);
     return { status: 'ok' };
   },
 };

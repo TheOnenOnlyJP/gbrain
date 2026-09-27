@@ -105,7 +105,7 @@ const remember: Operation = {
   annotations: { title: 'remember (memory write)', idempotentHint: true },
   handler: async (ctx, p) => {
     const { verbError, parseTtlParam } = await import('./operations.ts');
-    const fact = typeof p.fact === 'string' ? p.fact.trim() : '';
+    let fact = typeof p.fact === 'string' ? p.fact.trim() : '';
     if (!fact) {
       throw verbError(
         'invalid_params',
@@ -113,7 +113,7 @@ const remember: Operation = {
         'Pass the claim to remember, e.g. fact: "picked Stripe over Adyen — onboarding speed".',
       );
     }
-    const provenance = typeof p.provenance === 'string' ? p.provenance.trim() : '';
+    let provenance = typeof p.provenance === 'string' ? p.provenance.trim() : '';
     if (!provenance) {
       throw verbError(
         'provenance_required',
@@ -144,6 +144,15 @@ const remember: Operation = {
         'Use "world" (default — agents can recall it) or "private" (local CLI reads only).',
       );
     }
+    let entity = typeof p.entity === 'string' && p.entity.trim() ? p.entity.trim() : '';
+    if (!ctx.dryRun) {
+      const { sanitizeContentFieldsForImport } = await import('./content-secret-guard.ts');
+      [fact, provenance, entity] = await sanitizeContentFieldsForImport(
+        [fact, provenance, entity],
+        'memory-verb/remember',
+      );
+    }
+
     if (ctx.dryRun) {
       parseTtlParam(p.ttl); // Dry runs still validate without admitting intent.
       return {
@@ -156,7 +165,7 @@ const remember: Operation = {
 
     const { submitRememberMutation } = await import('./persistence/memory-mutations.ts');
     const { runMemoryWrite } = await import('./persistence/verb-errors.ts');
-    return runMemoryWrite(() => submitRememberMutation(ctx, { ...p, fact, provenance, kind, visibility }));
+    return runMemoryWrite(() => submitRememberMutation(ctx, { ...p, fact, provenance, kind, visibility, ...(entity ? { entity } : {}) }));
   },
   cliHints: { name: 'remember', positional: ['fact'] },
 };

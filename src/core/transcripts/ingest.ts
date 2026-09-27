@@ -278,21 +278,34 @@ export async function runTranscriptsIngest(
             // path would import.
             newWorkSessions++;
           } else {
+            const { sanitizeStructuredContentForImport } = await import('../content-secret-guard.ts');
+            const guardedSession = await sanitizeStructuredContentForImport(
+              {
+                parts: rendered.parts.map((part) => part.content),
+                raw: redacted.session.meta.raw ?? null,
+                provenance: {
+                  source_kind: `transcript:${session.meta.harness}`,
+                  source_uri: path,
+                  ingested_via: 'cli:transcripts-ingest',
+                },
+              },
+              `transcripts/${session.meta.sessionId}`,
+            );
             // The RESOLVED base slug: identity dedup can resolve part 1 to an
             // EXISTING page under a different slug (same session id, changed
             // title or corrected start date) — raw-data writes and stale-part
             // reconciliation must follow the page that actually exists, or
             // every re-run aborts on a nonexistent slug.
             let resolvedBaseSlug = rendered.baseSlug;
-            for (const part of rendered.parts) {
+            for (const [partIndex, part] of rendered.parts.entries()) {
               try {
-                const r = await importFromContent(engine, part.slug, part.content, {
+                const r = await importFromContent(engine, part.slug, guardedSession.parts[partIndex] ?? '', {
                   noEmbed: !opts.embed,
                   sourceId: opts.sourceId,
                   activePack: opts.activePack,
-                  source_kind: `transcript:${session.meta.harness}`,
-                  source_uri: path,
-                  ingested_via: 'cli:transcripts-ingest',
+                  source_kind: guardedSession.provenance.source_kind,
+                  source_uri: guardedSession.provenance.source_uri,
+                  ingested_via: guardedSession.provenance.ingested_via,
                 });
                 outcome.statuses.push(r.status);
                 if (r.status === 'imported') result.pages.imported++;
@@ -333,7 +346,7 @@ export async function runTranscriptsIngest(
             // write is HEALED, not assumed: a prior run can have committed
             // the pages and then died before putRawData, and hash-skips
             // would otherwise make that hole permanent.
-            if (redacted.session.meta.raw) {
+            if (guardedSession.raw) {
               try {
                 const rawSource = `transcript:${session.meta.harness}`;
                 // Skipped re-runs COMPARE, never assume: existence alone is
@@ -360,10 +373,10 @@ export async function runTranscriptsIngest(
                   needsRaw =
                     existing.length === 0 ||
                     canonicalJson(existing[0].data) !==
-                      canonicalJson(JSON.parse(JSON.stringify(redacted.session.meta.raw)));
+                      canonicalJson(JSON.parse(JSON.stringify(guardedSession.raw)));
                 }
                 if (needsRaw) {
-                  await engine.putRawData(resolvedBaseSlug, rawSource, redacted.session.meta.raw, {
+                  await engine.putRawData(resolvedBaseSlug, rawSource, guardedSession.raw, {
                     sourceId: opts.sourceId,
                   });
                 }

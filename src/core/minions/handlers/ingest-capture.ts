@@ -223,6 +223,7 @@ export function makeIngestCaptureHandler(engine: BrainEngine) {
     // drift between the two call sites.
     const importOpts = {
       noEmbed,
+      sanitizeSecrets: true,
       source_kind: event.source_kind,
       source_uri: event.source_uri,
       ingested_via: 'ingest_capture',
